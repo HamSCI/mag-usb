@@ -61,6 +61,24 @@ static inline bool ws_hdr_eq(const char *a, const char *b, uint32_t n) {
   return true;
 }
 
+// `Connection` carries a comma-separated token LIST (RFC 9110 7.6.1), and the
+// handshake needs `upgrade` to be one of its tokens (RFC 6455 4.2.1), not its
+// first word.  Firefox sends `Connection: keep-alive, Upgrade`, which a
+// prefix match on "Upgrade" rejected with 400 Bad Request.
+static inline bool ws_hdr_has_token(const char *val, uint32_t len, const char *tok) {
+  const uint32_t tok_len = (uint32_t)strlen(tok);
+  uint32_t i = 0;
+  while (i < len) {
+    while (i < len && (val[i] == ' ' || val[i] == '\t' || val[i] == ',')) i++;
+    uint32_t start = i;
+    while (i < len && val[i] != ',') i++;
+    uint32_t end = i;
+    while (end > start && (val[end - 1] == ' ' || val[end - 1] == '\t')) end--;
+    if (end - start == tok_len && ws_hdr_eq(val + start, tok, tok_len)) return true;
+  }
+  return false;
+}
+
 template<uint32_t RecvBufSize>
 class SocketTcpConnection
 {
@@ -513,7 +531,7 @@ public:
               upgrade_checked = true;
             }
             else if (key_len == 10 && ws_hdr_eq(data, "Connection", 10)) {
-              if (ws_hdr_eq(val, "Upgrade", 7)) connection_checked = true;
+              if (ws_hdr_has_token(val, val_len, "upgrade")) connection_checked = true;
             }
             else if (key_len == 20 && !memcmp(data, "Sec-WebSocket-Accept", 20)) {
               if (val_len != 28 || memcmp(val, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", 28)) break;
@@ -734,7 +752,7 @@ private:
             upgrade_checked = true;
           }
           else if (key_len == 10 && ws_hdr_eq(data, "Connection", 10)) {
-            if (ws_hdr_eq(val, "Upgrade", 7)) connection_checked = true;
+            if (ws_hdr_has_token(val, val_len, "upgrade")) connection_checked = true;
           }
           else if (key_len == 17 && ws_hdr_eq(data, "Sec-WebSocket-Key", 17)) {
             if (val_len != 24) break;

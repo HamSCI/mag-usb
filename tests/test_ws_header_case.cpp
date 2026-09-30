@@ -71,6 +71,21 @@ int main() {
     chk("Origin is not Host",
         ws_hdr_eq("Origin", "Hostxx", 6), false);
 
+    // Connection is a token LIST: `upgrade` may appear anywhere in it.
+    using websocket::ws_hdr_has_token;
+    auto conn = [](const char *v) {
+        return ws_hdr_has_token(v, (uint32_t)strlen(v), "upgrade");
+    };
+    chk("Connection: Upgrade matches", conn("Upgrade"), true);
+    chk("Connection: keep-alive, Upgrade (Firefox) matches",
+        conn("keep-alive, Upgrade"), true);
+    chk("Connection: Upgrade,keep-alive (no space) matches",
+        conn("Upgrade,keep-alive"), true);
+    chk("Connection: keep-alive alone does not match", conn("keep-alive"), false);
+    chk("Connection: Upgraded is not the token upgrade", conn("Upgraded"), false);
+    chk("Connection: x-upgrade is not the token upgrade", conn("x-upgrade"), false);
+    chk("Connection: empty does not match", conn(""), false);
+
     if (failures) {
         printf("\n%d failure(s)\n", failures);
         return 1;
