@@ -34,6 +34,33 @@ SOFTWARE.
 
 namespace websocket {
 
+// ⛔ HTTP header names are CASE-INSENSITIVE (RFC 9110 5.1), and so are the
+// `Upgrade: websocket` and `Connection: Upgrade` tokens (RFC 6455 4.2.1).
+// This parser compared them with memcmp, so a handshake was accepted only if
+// the client happened to use the same capitalisation as the literals below.
+//
+// Every HTTP/2-era client sends header names lowercased, because HTTP/2 and
+// HTTP/3 require it and their HTTP/1.1 paths follow suit.  Deno is one; so are
+// Go's x/net/websocket, many Rust clients, and anything built on nghttp2.  They
+// all received `400 Bad Request` from this server while a hand-written request
+// using "Sec-WebSocket-Key:" was accepted.  Measured against mag-usb on a live
+// station, 2026-09-30:
+//
+//     Canonical-Case headers  ->  HTTP/1.1 101 Switching Protocols
+//     lowercase (as Deno)     ->  HTTP/1.1 400 Bad Request
+//
+// The HamSCI magnetometer dashboard could not proxy this server's live feed
+// because of it, and had to hand-write its own handshake as a workaround.
+static inline bool ws_hdr_eq(const char *a, const char *b, uint32_t n) {
+  for (uint32_t i = 0; i < n; i++) {
+    char x = a[i], y = b[i];
+    if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
+    if (y >= 'A' && y <= 'Z') y = (char)(y - 'A' + 'a');
+    if (x != y) return false;
+  }
+  return true;
+}
+
 template<uint32_t RecvBufSize>
 class SocketTcpConnection
 {
@@ -481,23 +508,23 @@ public:
             while (*val == ' ') val++;
             uint32_t key_len = colon - data;
             uint32_t val_len = val_end - val;
-            if (key_len == 7 && !memcmp(data, "Upgrade", 7)) {
-              if (memcmp(val, "websocket", 9)) break;
+            if (key_len == 7 && ws_hdr_eq(data, "Upgrade", 7)) {
+              if (!ws_hdr_eq(val, "websocket", 9)) break;
               upgrade_checked = true;
             }
-            else if (key_len == 10 && !memcmp(data, "Connection", 10)) {
-              if (!memcmp(val, "Upgrade", 7)) connection_checked = true;
+            else if (key_len == 10 && ws_hdr_eq(data, "Connection", 10)) {
+              if (ws_hdr_eq(val, "Upgrade", 7)) connection_checked = true;
             }
             else if (key_len == 20 && !memcmp(data, "Sec-WebSocket-Accept", 20)) {
               if (val_len != 28 || memcmp(val, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", 28)) break;
               accept_checked = true;
             }
-            else if (key_len == 22 && !memcmp(data, "Sec-WebSocket-Protocol", 22) && resp_protocol_size > 0) {
+            else if (key_len == 22 && ws_hdr_eq(data, "Sec-WebSocket-Protocol", 22) && resp_protocol_size > 0) {
               uint32_t cp_len = std::min(resp_protocol_size - 1, val_len);
               memcpy(resp_protocol, val, cp_len);
               resp_protocol[cp_len] = 0;
             }
-            else if (key_len == 24 && !memcmp(data, "Sec-WebSocket-Extensions", 24) && resp_extensions_size > 0) {
+            else if (key_len == 24 && ws_hdr_eq(data, "Sec-WebSocket-Extensions", 24) && resp_extensions_size > 0) {
               uint32_t cp_len = std::min(resp_extensions_size - 1, val_len);
               memcpy(resp_extensions, val, cp_len);
               resp_extensions[cp_len] = 0;
@@ -694,34 +721,34 @@ private:
         uint32_t key_len = colon - data;
         uint32_t val_len = val_end - val;
         if (val_len < ValueBufSize) {
-          if (key_len == 4 && !memcmp(data, "Host", 4)) {
+          if (key_len == 4 && ws_hdr_eq(data, "Host", 4)) {
             memcpy(host, val, val_len);
             host[val_len] = 0;
           }
-          else if (key_len == 6 && !memcmp(data, "Origin", 6)) {
+          else if (key_len == 6 && ws_hdr_eq(data, "Origin", 6)) {
             memcpy(origin, val, val_len);
             origin[val_len] = 0;
           }
-          else if (key_len == 7 && !memcmp(data, "Upgrade", 7)) {
-            if (memcmp(val, "websocket", 9)) break;
+          else if (key_len == 7 && ws_hdr_eq(data, "Upgrade", 7)) {
+            if (!ws_hdr_eq(val, "websocket", 9)) break;
             upgrade_checked = true;
           }
-          else if (key_len == 10 && !memcmp(data, "Connection", 10)) {
-            if (!memcmp(val, "Upgrade", 7)) connection_checked = true;
+          else if (key_len == 10 && ws_hdr_eq(data, "Connection", 10)) {
+            if (ws_hdr_eq(val, "Upgrade", 7)) connection_checked = true;
           }
-          else if (key_len == 17 && !memcmp(data, "Sec-WebSocket-Key", 17)) {
+          else if (key_len == 17 && ws_hdr_eq(data, "Sec-WebSocket-Key", 17)) {
             if (val_len != 24) break;
             memcpy(wskey, val, val_len);
           }
-          else if (key_len == 21 && !memcmp(data, "Sec-WebSocket-Version", 21)) {
+          else if (key_len == 21 && ws_hdr_eq(data, "Sec-WebSocket-Version", 21)) {
             if (val_len != 2 || memcmp(val, "13", 2)) break;
             wsversion_checked = true;
           }
-          else if (key_len == 22 && !memcmp(data, "Sec-WebSocket-Protocol", 22)) {
+          else if (key_len == 22 && ws_hdr_eq(data, "Sec-WebSocket-Protocol", 22)) {
             memcpy(wsprotocol, val, val_len);
             wsprotocol[val_len] = 0;
           }
-          else if (key_len == 24 && !memcmp(data, "Sec-WebSocket-Extensions", 24)) {
+          else if (key_len == 24 && ws_hdr_eq(data, "Sec-WebSocket-Extensions", 24)) {
             memcpy(wsextensions, val, val_len);
             wsextensions[val_len] = 0;
           }

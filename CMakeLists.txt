@@ -76,6 +76,14 @@ if (ENABLE_WEBSOCKET)
         target_compile_definitions(websocket-tests PRIVATE USE_WEBSOCKET)
         set_target_properties(websocket-tests PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
         add_test(NAME websocket-tests COMMAND websocket-tests)
+
+        # Header-name case-insensitivity (RFC 9110 5.1).  A unit test, not a
+        # socket test: it exercises the comparison directly, so there are no
+        # ports or timings to flake.
+        add_executable(ws-header-case-tests tests/test_ws_header_case.cpp)
+        target_include_directories(ws-header-case-tests PRIVATE
+            ${CMAKE_SOURCE_DIR}/third_party/mengrao-websocket)
+        add_test(NAME ws-header-case-tests COMMAND ws-header-case-tests)
     endif ()
 endif ()
 
